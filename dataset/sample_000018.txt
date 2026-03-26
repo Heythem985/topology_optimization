@@ -1,0 +1,1 @@
+{"sample": "sample_000018", "nelx": 40, "nely": 20, "forces": [{"x": 40, "y": 11, "dir": 0, "mag": 0.7271031825641011}], "fixed_nodes": [0]}
