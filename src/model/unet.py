@@ -69,11 +69,15 @@ class UNet(nn.Module):
 		self.bottleneck = DoubleConv(features[-1], features[-1] * 2)
 
 		self.ups = nn.ModuleList()
+		# Build up blocks. Each Up takes concatenated channels: current_x_channels + skip_channels
 		rev_feats = list(reversed(features))
-		up_in_ch = features[-1] * 2
+		current_channels = features[-1] * 2
 		for feat in rev_feats:
-			self.ups.append(Up(up_in_ch, feat, bilinear=bilinear))
-			up_in_ch = feat * 2
+			in_ch = current_channels + feat
+			self.ups.append(Up(in_ch, feat, bilinear=bilinear))
+			# After an Up, output channels become `feat` (the out_ch), which will be
+			# used as the current channels for the next iteration.
+			current_channels = feat
 
 		self.out_conv = OutConv(features[0], out_channels)
 

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# PyTorch checkpoints and models
+checkpoints/
+*.pth
+
+# Data processing outputs
+data/processed/
+
+# OS
+.DS_Store
+Thumbs.db
