@@ -21,14 +21,16 @@ def get_device():
 device = get_device()
 
 
-def train_epoch(model, loader, optimizer, criterion, device):
+def train_epoch(model, loader, optimizer, criterion, device, dice_w=1.0):
     model.train()
     total_loss = 0.0
     for xb, yb in loader:
         xb = xb.to(device)
         yb = yb.to(device)
         pred = model(xb)
-        loss = criterion(pred, yb)
+        bce = criterion(pred, yb)
+        dloss = dice_loss(pred, yb)
+        loss = bce + dice_w * dloss
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -44,9 +46,22 @@ def eval_epoch(model, loader, criterion, device):
             xb = xb.to(device)
             yb = yb.to(device)
             pred = model(xb)
-            loss = criterion(pred, yb)
+            bce = criterion(pred, yb)
+            # dice evaluated in eval as well for consistency
+            dloss = dice_loss(pred, yb)
+            loss = bce + dloss
             total_loss += float(loss.item()) * xb.size(0)
     return total_loss / len(loader.dataset)
+
+
+def dice_loss(logits, target, eps=1e-6):
+    pred = torch.sigmoid(logits)
+    pred = pred.view(pred.size(0), -1)
+    target = target.view(target.size(0), -1)
+    intersection = (pred * target).sum(1)
+    denom = pred.sum(1) + target.sum(1)
+    dice = (2 * intersection + eps) / (denom + eps)
+    return 1.0 - dice.mean()
 
 
 def main():
@@ -57,6 +72,7 @@ def main():
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--seed', type=int, default=42)
     p.add_argument('--out', default='checkpoints')
+    p.add_argument('--dice-weight', type=float, default=1.0, help='Weight for Dice loss added to BCE')
     p.add_argument('--split-action', choices=['replace', 'append', 'skip'], default='append',
                    help='How to handle persisted split folders under the data dir: "replace" = delete and write new, "append" = copy missing files only, "skip" = do not modify persisted folders (will load them if present)')
     args = p.parse_args()
@@ -145,17 +161,24 @@ def main():
     model = model.to(device)
 
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     best_val = math.inf
     for epoch in range(1, args.epochs + 1):
-        tr_loss = train_epoch(model, train_loader, optimizer, criterion, device)
+        tr_loss = train_epoch(model, train_loader, optimizer, criterion, device, dice_w=args.dice_weight)
         val_loss = eval_epoch(model, val_loader, criterion, device)
-        print(f'Epoch {epoch}/{args.epochs} — train_loss: {tr_loss:.4f} val_loss: {val_loss:.4f}')
+        lr = optimizer.param_groups[0]['lr']
+        print(f'Epoch {epoch}/{args.epochs} — lr: {lr:.6g} — train_loss: {tr_loss:.4f} val_loss: {val_loss:.4f}')
         if val_loss < best_val:
             best_val = val_loss
             torch.save({'model_state': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, os.path.join(args.out, 'unet_best.pth'))
         torch.save({'model_state': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, os.path.join(args.out, 'unet_last.pth'))
+        # step scheduler on validation loss
+        try:
+            scheduler.step(val_loss)
+        except Exception:
+            pass
 
     print('Training finished. Best val loss:', best_val)
 

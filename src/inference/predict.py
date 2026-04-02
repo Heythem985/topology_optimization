@@ -4,6 +4,7 @@ import argparse
 import glob
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
 
 # ensure project root on path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -33,14 +34,16 @@ def gather_test_paths(test_dir):
     return []
 
 
-def evaluate(model, loader, device, threshold=0.5, save_dir=None):
+def evaluate(model, loader, device, threshold=0.5, save_dir=None, viz_dir=None, paths=None):
     total_pixels = 0
     correct = 0
     inter = 0
     union = 0
     os.makedirs(save_dir, exist_ok=True) if save_dir else None
+    os.makedirs(viz_dir, exist_ok=True) if viz_dir else None
 
     sigmoid = torch.nn.Sigmoid()
+    global_idx = 0
     with torch.no_grad():
         for xb, yb in loader:
             xb = xb.to(device)
@@ -54,6 +57,7 @@ def evaluate(model, loader, device, threshold=0.5, save_dir=None):
             for i in range(b):
                 p = preds[i, 0]
                 g = gt[i, 0]
+                prob_arr = probs[i, 0].cpu().numpy()
                 tp = int((p & g).sum().item())
                 un = int(((p | g)).sum().item())
                 cr = int((p == g).sum().item())
@@ -61,10 +65,31 @@ def evaluate(model, loader, device, threshold=0.5, save_dir=None):
                 correct += cr
                 inter += tp
                 union += un
+                # determine filename (if paths provided use original basename)
+                if paths and global_idx < len(paths):
+                    base = os.path.splitext(os.path.basename(paths[global_idx]))[0]
+                else:
+                    base = f'pred_{global_idx}'
                 if save_dir:
-                    # save predicted mask and probability as npz
-                    outp = os.path.join(save_dir, f'pred_{i}.npz')
-                    np.savez_compressed(outp, prob=probs[i,0].cpu().numpy(), pred=p.cpu().numpy())
+                    outp = os.path.join(save_dir, f'{base}.npz')
+                    np.savez_compressed(outp, prob=prob_arr, pred=p.cpu().numpy())
+                if viz_dir:
+                    # save visualization: prob | pred | gt
+                    fig, axes = plt.subplots(1, 3, figsize=(9, 3))
+                    axes[0].imshow(prob_arr, cmap='gray', vmin=0, vmax=1)
+                    axes[0].set_title('Prob')
+                    axes[0].axis('off')
+                    axes[1].imshow(p.cpu().numpy(), cmap='gray', vmin=0, vmax=1)
+                    axes[1].set_title('Pred')
+                    axes[1].axis('off')
+                    axes[2].imshow(g.cpu().numpy(), cmap='gray', vmin=0, vmax=1)
+                    axes[2].set_title('GT')
+                    axes[2].axis('off')
+                    fig.tight_layout()
+                    vizp = os.path.join(viz_dir, f'{base}.png')
+                    fig.savefig(vizp, dpi=150)
+                    plt.close(fig)
+                global_idx += 1
 
     accuracy = correct / total_pixels if total_pixels else 0.0
     iou = inter / union if union else 0.0
@@ -79,6 +104,7 @@ def main():
     p.add_argument('--threshold', type=float, default=0.5)
     p.add_argument('--device', default='cpu')
     p.add_argument('--save-dir', default=None, help='optional dir to save prediction npz files')
+    p.add_argument('--viz-dir', default=None, help='optional dir to save visualization PNGs (prob, pred, gt)')
     args = p.parse_args()
 
     device = torch.device(args.device)
@@ -92,7 +118,7 @@ def main():
     ds = TopologyDataset(paths)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-    acc, iou = evaluate(model, loader, device, threshold=args.threshold, save_dir=args.save_dir)
+    acc, iou = evaluate(model, loader, device, threshold=args.threshold, save_dir=args.save_dir, viz_dir=args.viz_dir, paths=paths)
     print(f'Accuracy (pixel): {acc:.4f}  IoU: {iou:.4f}')
 
 
