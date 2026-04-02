@@ -1,6 +1,6 @@
 # Topology Optimization — UNet
 
-Minimal project for topology optimization using a UNet model (training, inference, and a small Streamlit UI).
+Topology optimization using a UNet model (training, inference, and a small Streamlit UI).
 
 ## Quick Start
 
